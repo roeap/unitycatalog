@@ -110,9 +110,13 @@ jobs:
     needs: docker-cli-test
     runs-on: ${{ matrix.platform.runner }}
 
-    # Publish only from the canonical repo (never from forks), on pushes to
-    # main / tags, not on PRs.
-    if: ${{ contains(fromJSON('["push", "workflow_dispatch"]'), github.event_name) && github.repository == 'unitycatalog/unitycatalog' && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main') }}
+    # Publish from the canonical repo on pushes to main / tags, not on PRs.
+    #
+    # DEV-ONLY CARVE-OUT (do not upstream): also allow the roeap/unitycatalog
+    # fork to publish a validation image, but ONLY on an explicit v* tag push --
+    # never on main pushes -- so publishing stays a deliberate act. Remove this
+    # `roeap` clause before any PR to unitycatalog/unitycatalog.
+    if: ${{ contains(fromJSON('["push", "workflow_dispatch"]'), github.event_name) && ((github.repository == 'unitycatalog/unitycatalog' && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main')) || (github.repository == 'roeap/unitycatalog' && startsWith(github.ref, 'refs/tags/'))) }}
 
     permissions:
       contents: read
