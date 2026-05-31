@@ -95,10 +95,13 @@ public class FileIOFactory {
   }
 
   protected S3Client getS3Client(AwsCredentialsProvider awsCredentialsProvider, String region) {
+    // The endpoint itself is picked up automatically by the AWS SDK from AWS_ENDPOINT_URL_S3.
+    // Path-style addressing, however, must be set explicitly and is required by S3-compatible
+    // stores (e.g. SeaweedFS, MinIO) used for local/demo deployments.
     return S3Client.builder()
         .region(Region.of(region))
         .credentialsProvider(awsCredentialsProvider)
-        .forcePathStyle(false)
+        .forcePathStyle(S3EndpointResolver.isPathStyleAccess())
         .build();
   }
 

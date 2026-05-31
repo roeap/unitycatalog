@@ -17,6 +17,7 @@ import org.apache.iceberg.aws.s3.S3FileIOProperties;
 import org.apache.iceberg.azure.AzureProperties;
 import org.apache.iceberg.gcp.GCPProperties;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
@@ -73,10 +74,20 @@ public class TableConfigService {
     AwsCredentials awsCredential =
         storageCredentialVendor.vendCredential(location, privileges).getAwsTempCredentials();
 
-    return Map.of(
-        S3FileIOProperties.ACCESS_KEY_ID, awsCredential.getAccessKeyId(),
-        S3FileIOProperties.SECRET_ACCESS_KEY, awsCredential.getSecretAccessKey(),
-        S3FileIOProperties.SESSION_TOKEN, awsCredential.getSessionToken(),
-        AwsClientProperties.CLIENT_REGION, s3StorageConfig.getRegion());
+    Map<String, String> config = new HashMap<>();
+    config.put(S3FileIOProperties.ACCESS_KEY_ID, awsCredential.getAccessKeyId());
+    config.put(S3FileIOProperties.SECRET_ACCESS_KEY, awsCredential.getSecretAccessKey());
+    config.put(S3FileIOProperties.SESSION_TOKEN, awsCredential.getSessionToken());
+    config.put(AwsClientProperties.CLIENT_REGION, s3StorageConfig.getRegion());
+
+    // For local S3-compatible stores (e.g. SeaweedFS), point external engines at the same custom
+    // endpoint and enable path-style addressing so they hit the local store rather than AWS S3.
+    String endpoint = S3EndpointResolver.customEndpoint();
+    if (endpoint != null) {
+      config.put(S3FileIOProperties.ENDPOINT, endpoint);
+      config.put(S3FileIOProperties.PATH_STYLE_ACCESS, "true");
+    }
+
+    return config;
   }
 }

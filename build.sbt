@@ -44,6 +44,11 @@ lazy val jacksonVersion = "2.17.0"
 lazy val openApiToolsJacksonBindNullableVersion = "0.2.6"
 lazy val log4jVersion = "2.25.3"
 val orgApacheHttpVersion = "4.5.14"
+// AWS SDK for Java v2. Aligned with the version Apache Iceberg 1.9.2 pulls in
+// transitively (AWS SDK BOM 2.29.52), which also enables the SDK to auto-read
+// the AWS_ENDPOINT_URL_S3 environment variable (added in 2.28.1) for local
+// S3-compatible stores such as SeaweedFS.
+lazy val awsSdkV2Version = "2.29.52"
 
 lazy val commonSettings = Seq(
   organization := orgName,
@@ -391,8 +396,8 @@ lazy val server = (project in file("server"))
 
       //For s3 access
       "com.amazonaws" % "aws-java-sdk-s3" % "1.12.728",
-      "software.amazon.awssdk" % "sso" % "2.27.12",
-      "software.amazon.awssdk" % "ssooidc" % "2.27.12",
+      "software.amazon.awssdk" % "sso" % awsSdkV2Version,
+      "software.amazon.awssdk" % "ssooidc" % awsSdkV2Version,
 
       "org.apache.httpcomponents" % "httpcore" % "4.4.16",
       "org.apache.httpcomponents" % "httpclient" % "4.5.14",
@@ -402,8 +407,8 @@ lazy val server = (project in file("server"))
       "org.apache.iceberg" % "iceberg-aws" % "1.9.2",
       "org.apache.iceberg" % "iceberg-azure" % "1.9.2",
       "org.apache.iceberg" % "iceberg-gcp" % "1.9.2",
-      "software.amazon.awssdk" % "s3" % "2.24.0",
-      "software.amazon.awssdk" % "sts" % "2.24.0",
+      "software.amazon.awssdk" % "s3" % awsSdkV2Version,
+      "software.amazon.awssdk" % "sts" % awsSdkV2Version,
       "io.vertx" % "vertx-core" % "4.3.5",
       "io.vertx" % "vertx-web" % "4.3.5",
       "io.vertx" % "vertx-web-client" % "4.3.5",

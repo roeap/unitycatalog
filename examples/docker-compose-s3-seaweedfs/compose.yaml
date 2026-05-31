@@ -1,0 +1,72 @@
+name: unitycatalog-s3-seaweedfs
+
+# Runs Unity Catalog against a local SeaweedFS instance acting as an S3-compatible
+# store. No AWS account or network access required.
+#
+# Credential model (important): SeaweedFS does not implement AWS STS, so Unity
+# Catalog's external-location + stored-credential (assume-role) path cannot be
+# used here. Instead we use the legacy per-bucket *static* credential path
+# (s3.* in server.properties with a session token set), which vends the
+# configured keys directly without calling STS. Managed tables work as long as
+# no external location is registered over the managed storage root.
+#
+# The custom S3 endpoint is supplied via the standard AWS_ENDPOINT_URL_S3
+# environment variable, which the AWS SDK for Java v2 reads automatically.
+
+services:
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:3.80
+    command: "server -dir=/data -s3 -s3.port=8333 -ip=seaweedfs"
+    ports:
+      - "8333:8333"   # S3 API
+      - "8888:8888"   # Filer (handy for browsing objects)
+    volumes:
+      - seaweedfs_data:/data
+    healthcheck:
+      # SeaweedFS S3 returns 200 on the service root once the S3 API is up.
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8333"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # One-shot job that creates the demo bucket, then exits.
+  create-bucket:
+    image: amazon/aws-cli:2.15.0
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: seaweedfsadmin
+      AWS_SECRET_ACCESS_KEY: seaweedfssecret
+      AWS_REGION: us-east-1
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        aws --endpoint-url http://seaweedfs:8333 s3 mb s3://uc-demo || true
+        aws --endpoint-url http://seaweedfs:8333 s3 ls
+
+  server:
+    image: unitycatalog/unitycatalog:latest
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+      create-bucket:
+        condition: service_completed_successfully
+    ports:
+      - "8080:8080"
+    environment:
+      # Read automatically by the AWS SDK v2 (>= 2.28.1); also used by the
+      # server to enable path-style addressing required by SeaweedFS.
+      AWS_ENDPOINT_URL_S3: "http://seaweedfs:8333"
+    volumes:
+      - type: bind
+        source: ./etc/conf
+        target: /opt/unitycatalog/etc/conf
+      - type: volume
+        source: unitycatalog_data
+        target: /opt/unitycatalog/etc/data
+
+volumes:
+  seaweedfs_data:
+  unitycatalog_data:
