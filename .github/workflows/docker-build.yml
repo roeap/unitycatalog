@@ -6,6 +6,10 @@ on:
       - "v*"
     branches:
       - main
+      # Feature branches (e.g. on forks): build + image smoke test for dev
+      # feedback. The registry-publish jobs stay gated to the canonical repo,
+      # so nothing is pushed to a registry from a fork.
+      - "feat/**"
     paths:
       - build/**
       - project/**
