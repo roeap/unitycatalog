@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - "v*"
+      # `*-qemu` tags are reserved for docker-build-qemu.yml (the QEMU fallback);
+      # exclude them here so a single tag push does not trigger both workflows.
+      - "!*-qemu"
     branches:
       - main
       # Feature branches (e.g. on forks): build + image smoke test for dev
