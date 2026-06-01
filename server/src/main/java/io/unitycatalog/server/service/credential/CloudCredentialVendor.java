@@ -9,6 +9,7 @@ import io.unitycatalog.server.service.credential.aws.AwsCredentialVendor;
 import io.unitycatalog.server.service.credential.azure.AzureCredential;
 import io.unitycatalog.server.service.credential.azure.AzureCredentialVendor;
 import io.unitycatalog.server.service.credential.gcp.GcpCredentialVendor;
+import io.unitycatalog.server.service.iceberg.S3EndpointResolver;
 import io.unitycatalog.server.utils.ServerProperties;
 import software.amazon.awssdk.services.sts.model.Credentials;
 
@@ -60,13 +61,19 @@ public class CloudCredentialVendor {
 
   private TemporaryCredentials vendAwsCredential(CredentialContext context) {
     Credentials awsSessionCredentials = awsCredentialVendor.vendAwsCredentials(context);
+    // S3-compatible local stores (SeaweedFS, MinIO) have no STS, so the configured session token is
+    // a meaningless sentinel that only serves to select the static credential generator. Stripping
+    // it here makes clients fall back to a static credentials provider instead of treating these as
+    // temporary/session credentials. Real AWS (no custom endpoint) keeps its STS session token.
+    String sessionToken =
+        S3EndpointResolver.customEndpoint() == null ? awsSessionCredentials.sessionToken() : null;
     TemporaryCredentials temporaryCredentials =
         new TemporaryCredentials()
             .awsTempCredentials(
                 new AwsCredentials()
                     .accessKeyId(awsSessionCredentials.accessKeyId())
                     .secretAccessKey(awsSessionCredentials.secretAccessKey())
-                    .sessionToken(awsSessionCredentials.sessionToken()));
+                    .sessionToken(sessionToken));
 
     // Explicitly set the expiration time for the temporary credentials if it's a non-static
     // credential. For static credential, the expiration time can be nullable.
