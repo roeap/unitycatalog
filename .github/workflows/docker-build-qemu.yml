@@ -1,0 +1,139 @@
+name: Build and Push Docker Images (QEMU fallback) - unitycatalog
+
+# DEV-ONLY fallback for publishing a validation image (do not upstream).
+#
+# The primary docker-build.yml builds each arch on a NATIVE runner for speed.
+# The hosted `ubuntu-24.04-arm` runners are, however, intermittently
+# unavailable -- jobs sit in "pending runner allocation" or get cancelled
+# mid-build ("The operation was canceled" with the runner reclaimed). This
+# workflow is the escape hatch: it builds BOTH arches on a single amd64
+# runner via QEMU emulation (slower, but does not depend on arm64 runner
+# capacity), then pushes a multi-arch manifest in one shot.
+#
+# Two ways to trigger:
+#
+# 1. workflow_dispatch -- pick the tag in the "Run workflow" dialog (or
+#    `gh workflow run docker-build-qemu.yml -f tag=<tag>`). NOTE: GitHub only
+#    allows dispatching a workflow_dispatch workflow once the file exists on the
+#    repo's DEFAULT branch. Until this file is on main, use option 2.
+#
+# 2. Push a tag matching `*-qemu` (e.g. `v0.0.0-dev-2-qemu`). This works from a
+#    feature branch -- no main merge required -- and the `-qemu` suffix keeps it
+#    from colliding with the primary docker-build.yml, which fires on `v*` tags.
+#    The leading `v…` portion is used as the published image tag.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Git tag to build and publish (e.g. v0.0.0-dev-2). Also used as the image tag."
+        required: true
+        type: string
+  push:
+    tags:
+      - "*-qemu"
+
+env:
+  GHCR_IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  build:
+    name: Build and push ${{ matrix.target }} (multi-arch via QEMU)
+    runs-on: ubuntu-latest
+
+    # Same dev carve-out as docker-build.yml: only the roeap fork publishes.
+    if: ${{ github.repository == 'roeap/unitycatalog' }}
+
+    permissions:
+      contents: read
+      packages: write   # push to ghcr.io with GITHUB_TOKEN
+      id-token: write   # build provenance/SBOM attestations
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: runtime
+            suffix: ""
+          - target: distroless
+            suffix: "-distroless"
+
+    steps:
+      # Resolve the tag from whichever trigger fired:
+      #   workflow_dispatch -> the `tag` input verbatim
+      #   push (*-qemu)     -> github.ref_name with the `-qemu` suffix stripped,
+      #                        e.g. v0.0.0-dev-2-qemu -> v0.0.0-dev-2
+      # `ref` is the git ref to check out and build; `image_tag` is the tag the
+      # published image carries (never the `-qemu` build alias).
+      - name: Resolve tag
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ref="${{ inputs.tag }}"
+            image_tag="${{ inputs.tag }}"
+          else
+            ref="${{ github.ref_name }}"
+            image_tag="${ref%-qemu}"
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$image_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout the requested tag
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ steps.resolve.outputs.ref }}
+
+      # QEMU registers binfmt handlers so the amd64 runner can execute arm64
+      # build steps. This is what replaces the native arm64 runner.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # tag push v* -> the raw tag (e.g. v0.0.0-dev-2), the semver {{version}},
+      # and `latest`. Index-level OCI annotations for the multi-arch manifest.
+      - name: Generate image metadata and tags
+        id: meta
+        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: index
+        with:
+          images: ${{ env.GHCR_IMAGE }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ steps.resolve.outputs.image_tag }}
+            type=raw,value=${{ steps.resolve.outputs.image_tag }}
+          flavor: |
+            latest=auto
+            suffix=${{ matrix.suffix }},onlatest=true
+          labels: |
+            org.opencontainers.image.title=Unity Catalog Server${{ matrix.suffix == '-distroless' && ' (distroless)' || '' }}
+            org.opencontainers.image.description=Open source catalog for data and AI assets
+            org.opencontainers.image.vendor=Unity Catalog
+            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.documentation=https://docs.unitycatalog.io
+
+      # Single build producing a multi-arch manifest list. amd64 runs natively,
+      # arm64 runs under QEMU emulation -- slower, but immune to arm64 runner
+      # allocation problems.
+      - name: Build and push (linux/amd64, linux/arm64)
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha,scope=qemu-${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=qemu-${{ matrix.target }}

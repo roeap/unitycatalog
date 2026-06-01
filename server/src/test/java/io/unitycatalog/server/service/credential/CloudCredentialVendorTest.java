@@ -24,6 +24,7 @@ import io.unitycatalog.server.service.credential.gcp.GcpCredentialVendor;
 import io.unitycatalog.server.service.credential.gcp.GcsStorageConfig;
 import io.unitycatalog.server.service.credential.gcp.StaticTestingCredentialGenerator;
 import io.unitycatalog.server.service.credential.gcp.TestingCredentialGenerator;
+import io.unitycatalog.server.service.iceberg.S3EndpointResolver;
 import io.unitycatalog.server.utils.NormalizedURL;
 import io.unitycatalog.server.utils.ServerProperties;
 import java.util.Map;
@@ -85,14 +86,19 @@ public class CloudCredentialVendorTest {
                     .build()));
     AwsCredentialVendor awsCredentialVendor = new AwsCredentialVendor(serverProperties);
     credentialsOperations = new CloudCredentialVendor(awsCredentialVendor, null, null);
-    TemporaryCredentials s3TemporaryCredentials =
-        vendCredential("s3://storageBase/abc", Set.of(CredentialContext.Privilege.SELECT));
-    assertThat(s3TemporaryCredentials.getAwsTempCredentials())
-        .isEqualTo(
-            new AwsCredentials()
-                .accessKeyId(ACCESS_KEY)
-                .secretAccessKey(SECRET_KEY)
-                .sessionToken(SESSION_TOKEN));
+    try (MockedStatic<S3EndpointResolver> resolver = Mockito.mockStatic(S3EndpointResolver.class)) {
+      // Pin to real-AWS behavior (no custom endpoint) so this assertion is independent of the
+      // ambient AWS_ENDPOINT_URL_S3 environment.
+      resolver.when(S3EndpointResolver::customEndpoint).thenReturn(null);
+      TemporaryCredentials s3TemporaryCredentials =
+          vendCredential("s3://storageBase/abc", Set.of(CredentialContext.Privilege.SELECT));
+      assertThat(s3TemporaryCredentials.getAwsTempCredentials())
+          .isEqualTo(
+              new AwsCredentials()
+                  .accessKeyId(ACCESS_KEY)
+                  .secretAccessKey(SECRET_KEY)
+                  .sessionToken(SESSION_TOKEN));
+    }
 
     // Test when sts client is called
     when(serverProperties.getS3Configurations())
@@ -111,6 +117,68 @@ public class CloudCredentialVendorTest {
             () ->
                 vendCredential("s3://storageBase/abc", Set.of(CredentialContext.Privilege.SELECT)))
         .isInstanceOf(StsException.class);
+  }
+
+  @Test
+  public void testLocalEndpointVendsStaticCredentialsWithoutSessionToken() {
+    final String ACCESS_KEY = "seaweedfsadmin";
+    final String SECRET_KEY = "seaweedfssecret";
+    final String SESSION_TOKEN = "local-seaweedfs";
+    // Static per-bucket config whose session token selects the static generator.
+    when(serverProperties.getS3Configurations())
+        .thenReturn(
+            Map.of(
+                NormalizedURL.from("s3://storageBase"),
+                S3StorageConfig.builder()
+                    .accessKey(ACCESS_KEY)
+                    .secretKey(SECRET_KEY)
+                    .sessionToken(SESSION_TOKEN)
+                    .build()));
+    AwsCredentialVendor awsCredentialVendor = new AwsCredentialVendor(serverProperties);
+    credentialsOperations = new CloudCredentialVendor(awsCredentialVendor, null, null);
+
+    try (MockedStatic<S3EndpointResolver> resolver = Mockito.mockStatic(S3EndpointResolver.class)) {
+      resolver.when(S3EndpointResolver::customEndpoint).thenReturn("http://seaweedfs:8333");
+      TemporaryCredentials s3TemporaryCredentials =
+          vendCredential("s3://storageBase/abc", Set.of(CredentialContext.Privilege.SELECT));
+      // Access key and secret are preserved, but the sentinel session token must be stripped so the
+      // client uses a static (non-session) AWS credentials provider.
+      assertThat(s3TemporaryCredentials.getAwsTempCredentials().getAccessKeyId())
+          .isEqualTo(ACCESS_KEY);
+      assertThat(s3TemporaryCredentials.getAwsTempCredentials().getSecretAccessKey())
+          .isEqualTo(SECRET_KEY);
+      assertThat(s3TemporaryCredentials.getAwsTempCredentials().getSessionToken()).isNull();
+    }
+  }
+
+  @Test
+  public void testRealAwsEndpointPreservesSessionToken() {
+    final String ACCESS_KEY = "accessKey";
+    final String SECRET_KEY = "secretKey";
+    final String SESSION_TOKEN = "sessionToken";
+    when(serverProperties.getS3Configurations())
+        .thenReturn(
+            Map.of(
+                NormalizedURL.from("s3://storageBase"),
+                S3StorageConfig.builder()
+                    .accessKey(ACCESS_KEY)
+                    .secretKey(SECRET_KEY)
+                    .sessionToken(SESSION_TOKEN)
+                    .build()));
+    AwsCredentialVendor awsCredentialVendor = new AwsCredentialVendor(serverProperties);
+    credentialsOperations = new CloudCredentialVendor(awsCredentialVendor, null, null);
+
+    try (MockedStatic<S3EndpointResolver> resolver = Mockito.mockStatic(S3EndpointResolver.class)) {
+      resolver.when(S3EndpointResolver::customEndpoint).thenReturn(null);
+      TemporaryCredentials s3TemporaryCredentials =
+          vendCredential("s3://storageBase/abc", Set.of(CredentialContext.Privilege.SELECT));
+      assertThat(s3TemporaryCredentials.getAwsTempCredentials())
+          .isEqualTo(
+              new AwsCredentials()
+                  .accessKeyId(ACCESS_KEY)
+                  .secretAccessKey(SECRET_KEY)
+                  .sessionToken(SESSION_TOKEN));
+    }
   }
 
   @Test

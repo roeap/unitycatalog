@@ -1,0 +1,11 @@
+# Local Compose override (e.g. pinning images for offline/dev runs).
+compose.override.yaml
+
+# Runtime artifacts the server generates into the mounted config dir.
+etc/conf/certs.json
+etc/conf/key_id.txt
+etc/conf/*.der
+etc/conf/token.txt
+
+# Persisted local data, if a bind mount is used.
+etc/data/

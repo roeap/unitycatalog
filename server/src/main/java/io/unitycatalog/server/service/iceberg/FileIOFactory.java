@@ -18,6 +18,7 @@ import org.apache.iceberg.azure.adlsv2.ADLSFileIO;
 import org.apache.iceberg.gcp.GCPProperties;
 import org.apache.iceberg.gcp.gcs.GCSFileIO;
 import org.apache.iceberg.io.FileIO;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.AwsSessionCredentials;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
@@ -95,10 +96,13 @@ public class FileIOFactory {
   }
 
   protected S3Client getS3Client(AwsCredentialsProvider awsCredentialsProvider, String region) {
+    // The endpoint itself is picked up automatically by the AWS SDK from AWS_ENDPOINT_URL_S3.
+    // Path-style addressing, however, must be set explicitly and is required by S3-compatible
+    // stores (e.g. SeaweedFS, MinIO) used for local/demo deployments.
     return S3Client.builder()
         .region(Region.of(region))
         .credentialsProvider(awsCredentialsProvider)
-        .forcePathStyle(false)
+        .forcePathStyle(S3EndpointResolver.isPathStyleAccess())
         .build();
   }
 
@@ -106,11 +110,20 @@ public class FileIOFactory {
     try {
       AwsCredentials awsSessionCredentials =
           storageCredentialVendor.vendCredential(location, privileges).getAwsTempCredentials();
+      String sessionToken = awsSessionCredentials.getSessionToken();
+      // Local S3-compatible stores vend static credentials with no session token.
+      // AwsSessionCredentials rejects a null/empty token, so use AwsBasicCredentials in that case.
+      if (sessionToken == null || sessionToken.isEmpty()) {
+        return StaticCredentialsProvider.create(
+            AwsBasicCredentials.create(
+                awsSessionCredentials.getAccessKeyId(),
+                awsSessionCredentials.getSecretAccessKey()));
+      }
       return StaticCredentialsProvider.create(
           AwsSessionCredentials.create(
               awsSessionCredentials.getAccessKeyId(),
               awsSessionCredentials.getSecretAccessKey(),
-              awsSessionCredentials.getSessionToken()));
+              sessionToken));
     } catch (BaseException e) {
       return DefaultCredentialsProvider.create();
     }

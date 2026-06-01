@@ -1,7 +1,7 @@
 name: "Cross-Spark Build"
 on:
   push:
-    branches: [main, branch-*]
+    branches: [main, branch-*, "feat/**"]
     paths-ignore:
       - '**.md'
       - '**.txt'
