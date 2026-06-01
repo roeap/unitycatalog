@@ -25,10 +25,15 @@ services:
       - seaweedfs_data:/data
     healthcheck:
       # SeaweedFS S3 returns 200 on the service root once the S3 API is up.
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8333"]
+      # Use curl (not wget) and 127.0.0.1 explicitly: in this image wget resolves
+      # localhost to ::1 where the S3 API does not listen, giving false failures.
+      # start_period gives the master/volume/filer/S3 stack time to come up
+      # before failures count against the retry budget.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8333/"]
       interval: 5s
       timeout: 3s
       retries: 20
+      start_period: 30s
 
   # One-shot job that creates the demo bucket, then exits.
   create-bucket:
@@ -64,10 +69,10 @@ services:
     volumes:
       - type: bind
         source: ./etc/conf
-        target: /opt/unitycatalog/etc/conf
+        target: /home/unitycatalog/etc/conf
       - type: volume
         source: unitycatalog_data
-        target: /opt/unitycatalog/etc/data
+        target: /home/unitycatalog/etc/data
 
 volumes:
   seaweedfs_data:
