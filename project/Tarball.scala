@@ -37,8 +37,15 @@ object Tarball {
         allJars.foreach { jarFile =>
           IO.copyFile(jarFile, outputDir / "jars" / jarFile.getName)
         }
+        // Record the classpath using paths relative to the tarball root
+        // (jars/<name>.jar), NOT the absolute build-host cache paths of the
+        // source jars. This keeps the tarball portable: the jars live under
+        // jars/ once extracted, and bin/start-uc-server resolves these entries
+        // against the tarball root. Recording absolute source paths would tie
+        // the tarball to the machine that built it.
         val classpathFile = outputDir / "jars" / "classpath"
-        Files.write(classpathFile.toPath, allJars.mkString(":").getBytes)
+        val relativeEntries = allJars.map(jarFile => s"jars/${jarFile.getName}")
+        Files.write(classpathFile.toPath, relativeEntries.mkString(":").getBytes)
         // Copy the script files to the output directory
         IO.copyDirectory(scriptsDir, outputDir / "bin")
         // Copy the etc files to the output directory

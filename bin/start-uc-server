@@ -42,6 +42,10 @@ run_in_source_code() {
 # This function runs the server using the tarball
 run_in_tarball() {
   SERVER_CLASSPATH_FILE=$(find "$TARBALL_JAR_DIR" -name "classpath" | head -n 1)
+  # The tarball's classpath file uses paths relative to the tarball root
+  # (jars/<name>.jar), so run java from there for the JVM to resolve them
+  # regardless of the caller's working directory.
+  cd "$ROOT_DIR" || exit
   run_uc_server_java_command "$SERVER_CLASSPATH_FILE" "$@"
 }
 
